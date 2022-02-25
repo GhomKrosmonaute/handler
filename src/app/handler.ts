@@ -4,8 +4,8 @@ import fs from "fs/promises"
 import { EventEmitter, BaseEventNames } from "@ghom/event-emitter"
 
 export interface HandlerEvents extends BaseEventNames {
-  load: { params: [path: string]; context: null }
-  finish: { params: [pathList: string[]]; context: null }
+  load: [path: string]
+  finish: [pathList: string[]]
 }
 
 export class Handler extends EventEmitter<HandlerEvents> {
@@ -19,8 +19,8 @@ export class Handler extends EventEmitter<HandlerEvents> {
     for (const filename of filenames) {
       const filepath = path.join(this.path, filename)
       filepathList.push(filepath)
-      await this.emit("load", [filepath], null)
+      await this.emit("load", filepath)
     }
-    await this.emit("finish", [filepathList], null)
+    await this.emit("finish", filepathList)
   }
 }

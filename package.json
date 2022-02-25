@@ -1,6 +1,6 @@
 {
   "name": "@ghom/handler",
-  "version": "1.0.0",
+  "version": "1.1.0",
   "license": "MIT",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -20,6 +20,6 @@
     "jest": "^27.5.1"
   },
   "dependencies": {
-    "@ghom/event-emitter": "^1.0.4"
+    "@ghom/event-emitter": "^1.1.0"
   }
 }
