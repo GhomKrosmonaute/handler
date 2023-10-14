@@ -9,6 +9,7 @@ export const handler = new Handler("dist/table", {
   logger: console,
   loggerPattern: "loaded new table: $filename",
   loader: (path) => import(`file://${path}`),
+  pattern: /\.js$/,
 })
 
 try {

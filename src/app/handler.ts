@@ -25,6 +25,7 @@ export interface HandlerOptions<Element> {
    */
   loggerPattern?: string
   loader?: (path: string) => Promise<Element>
+  pattern?: RegExp
 }
 
 export class Handler<Element> extends EventEmitter<HandlerEvents> {
@@ -48,6 +49,9 @@ export class Handler<Element> extends EventEmitter<HandlerEvents> {
     const filenames = await fs.readdir(this.path)
     const filepathList: string[] = []
     for (const basename of filenames) {
+      if (this.options?.pattern && !this.options.pattern.test(basename))
+        continue
+
       const filepath = path.join(this.path, basename)
       const filename = path.basename(filepath, path.extname(filepath))
 
@@ -66,8 +70,9 @@ export class Handler<Element> extends EventEmitter<HandlerEvents> {
       if (this.options?.loader)
         this.elements.set(filepath, await this.options.loader(filepath))
 
-      await this.emit("load", filepath)
+      this.emit("load", filepath)
     }
-    await this.emit("finish", filepathList)
+
+    this.emit("finish", filepathList)
   }
 }
