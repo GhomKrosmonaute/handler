@@ -1,13 +1,6 @@
 import path from "path"
 import fs from "fs/promises"
 
-import { EventEmitter, BaseEventNames } from "@ghom/event-emitter"
-
-export interface HandlerEvents extends BaseEventNames {
-  load: [path: string]
-  finish: [pathList: string[]]
-}
-
 export interface HandlerOptions<Element> {
   logger?: {
     log: (message: string) => void
@@ -26,14 +19,17 @@ export interface HandlerOptions<Element> {
   loggerPattern?: string
   loader?: (path: string) => Promise<Element>
   pattern?: RegExp
+  onLoad?: (path: string) => Promise<void>
+  onFinish?: (paths: string[]) => Promise<void>
 }
 
-export class Handler<Element> extends EventEmitter<HandlerEvents> {
+export class Handler<Element> {
   public elements: Map<string, Element> = new Map()
 
-  constructor(private path: string, private options?: HandlerOptions<Element>) {
-    super()
-  }
+  public constructor(
+    private path: string,
+    private options?: HandlerOptions<Element>
+  ) {}
 
   /**
    * Here to prevent breaking changes.
@@ -70,9 +66,9 @@ export class Handler<Element> extends EventEmitter<HandlerEvents> {
       if (this.options?.loader)
         this.elements.set(filepath, await this.options.loader(filepath))
 
-      this.emit("load", filepath)
+      await this.options?.onLoad?.(filepath)
     }
 
-    this.emit("finish", filepathList)
+    await this.options?.onFinish?.(filepathList)
   }
 }
