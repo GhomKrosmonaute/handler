@@ -19,8 +19,17 @@ export interface HandlerOptions<Data> {
    */
   loggerPattern?: string
   loader?: (path: string) => Promise<Data>
+  /**
+   * If this function is defined, the reloaded files will be loaded by this function instead of the loader
+   */
+  reloader?: (path: string) => Promise<Data>
   pattern?: RegExp
   onLoad?: (path: string, data?: Data) => Promise<void>
+  /**
+   * If this function is defined, the reloaded files will stop
+   * going through the onLoad function and go through this one instead
+   */
+  onReload?: (path: string, data?: Data) => Promise<void>
   onFinish?: (paths: string[]) => Promise<void>
   /**
    * @default false
@@ -51,7 +60,7 @@ export class Handler<Data> {
 
     for (const basename of filenames) {
       try {
-        filepathList.push(await this._handle(basename))
+        filepathList.push(await this._handle(basename, false))
       } catch (error: any) {
         if (error.message.startsWith("Ignored")) continue
         else throw error
@@ -65,7 +74,7 @@ export class Handler<Data> {
         if (event !== "change" || !basename) return
 
         try {
-          await this._handle(basename)
+          await this._handle(basename, true)
         } catch (error: any) {
           if (error.message.startsWith("Ignored")) return
           else throw error
@@ -81,7 +90,11 @@ export class Handler<Data> {
     this.md5.clear()
   }
 
-  private async _handle(this: this, basename: string): Promise<string> {
+  private async _handle(
+    this: this,
+    basename: string,
+    reloaded: boolean
+  ): Promise<string> {
     if (this.options?.pattern && !this.options.pattern.test(basename))
       throw new Error(`Ignored ${basename} by pattern`)
 
@@ -99,7 +112,7 @@ export class Handler<Data> {
         }, this.options.hotReloadTimeout ?? 100)
       )
 
-      const md5sum = md5(await fs.promises.readFile(filepath))
+      const md5sum = md5(fs.readFileSync(filepath))
 
       if (this.md5.get(filepath) === md5sum)
         throw new Error(`Ignored ${basename} by md5 check`)
@@ -118,12 +131,21 @@ export class Handler<Data> {
 
     let loaded!: Data
 
-    if (this.options?.loader) {
-      loaded = await this.options.loader(filepath)
+    const loader = reloaded
+      ? this.options?.reloader ?? this.options?.loader
+      : this.options?.loader
+    const onLoad = reloaded
+      ? this.options?.onReload ?? this.options?.onLoad
+      : this.options?.onLoad
+
+    if (loader) {
+      loaded = await loader(filepath)
       this.elements.set(filepath, loaded)
     }
 
-    await this.options?.onLoad?.(filepath, loaded)
+    if (onLoad) {
+      await onLoad(filepath, loaded)
+    }
 
     return filepath
   }

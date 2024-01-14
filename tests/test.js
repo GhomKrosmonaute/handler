@@ -4,51 +4,44 @@ const { Handler } = require("../dist/index")
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-const Inputs = jest.fn().mockReturnValueOnce(42).mockReturnValueOnce(666)
+const Inputs = jest.fn().mockReturnValueOnce("42").mockReturnValueOnce("666")
 
-const Outputs = jest
+const Loaded = jest
   .fn()
-  .mockReturnValueOnce(0)
-  .mockReturnValueOnce(1)
-  .mockReturnValueOnce(2)
-  .mockReturnValueOnce(42)
-  .mockReturnValueOnce(666)
+  .mockReturnValueOnce("0")
+  .mockReturnValueOnce("1")
+  .mockReturnValueOnce("2")
+
+const Reloaded = jest.fn().mockReturnValueOnce("42").mockReturnValueOnce("666")
 
 beforeAll(() => {
-  fs.writeFileSync(
-    path.join(__dirname, "files", "b.js"),
-    "module.exports = 1\n"
-  )
+  fs.writeFileSync(path.join(__dirname, "files", "b.txt"), "1")
 })
 
-test("hot-reload", (done) => {
+test("test", (done) => {
   const handler = new Handler(path.join(__dirname, "files"), {
-    pattern: /\.js$/i,
+    pattern: /\.txt$/i,
     hotReload: true,
     loader: async (filepath) => {
-      delete require.cache[path.resolve(filepath)]
-      return require(filepath)
+      return fs.promises.readFile(filepath, "utf8")
     },
     onLoad: async (filepath, data) => {
-      console.log(path.basename(filepath), data)
-      expect(data).toBe(Outputs())
+      expect(data).toBe(Loaded())
+    },
+    onReload: async (filepath, data) => {
+      expect(data).toBe(Reloaded())
     },
   })
 
   const tick = async () => {
-    await fs.promises.writeFile(
-      path.join(__dirname, "files", "b.js"),
-      `module.exports = ${Inputs()}
-`
-    )
+    fs.writeFileSync(path.join(__dirname, "files", "b.txt"), Inputs())
 
     await wait(150)
-
-    console.log("tick")
   }
 
   handler
     .init()
+    .then(() => wait(150))
     .then(tick)
     .then(tick)
     .then(() => {
@@ -59,8 +52,5 @@ test("hot-reload", (done) => {
 })
 
 afterAll(() => {
-  fs.writeFileSync(
-    path.join(__dirname, "files", "b.js"),
-    "module.exports = 1\n"
-  )
+  fs.writeFileSync(path.join(__dirname, "files", "b.txt"), "1")
 })
