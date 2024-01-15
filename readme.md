@@ -1,5 +1,8 @@
 # File handler
 
+This package is a file handler for NodeJS. It can load files from a directory, and it can reload the files if they changed.
+You can handle any file type with this handler, but you need to write a loader function for it.
+
 ## Basic usage
 
 ```ts
@@ -39,13 +42,12 @@ export const handler = new Handler("dist/files", {
 export const handler = new Handler("dist/files", {
   pattern: /\.js$/,
   hotReload: true,
-  loader: (path) => import(`file://${path}`),
-  reloader: (path) => import(`file://${path}?update=${Date.now()}`),
+  loader: (path) => import(`file://${path}?update=${Date.now()}`),
   onLoad: (path, data) => {
     // Do something with the loaded data
   },
-  onReload: (path, data) => {
-    // Do something with the reloaded data
+  onChange: (path, data) => {
+    // Do something with the changed data
   },
 })
 ```
@@ -55,13 +57,10 @@ The `?update=${Date.now()}` text part is important if you want to import the cha
 ## Same example but with CommonJS
 
 ```ts
-const handler = new Handler("dist/table", {
+const handler = new Handler("dist/files", {
   pattern: /\.js$/,
   hotReload: true,
   loader: (path) => {
-    return require(path)
-  },
-  reloader: (path) => {
     delete require.cache[require.resolve(path)]
     return require(path)
   },
@@ -71,12 +70,12 @@ const handler = new Handler("dist/table", {
 
 The `delete require.cache[require.resolve(path)]` line is important if you want to require the changed file with the hot reloading.
 
-## Example for simple file handler
+## Example for simple file handler (for txt files)
 
 ```ts
 import fs from "fs"
 
-const handler = new Handler(path.join(__dirname, "files"), {
+const handler = new Handler("dist/files", {
   pattern: /\.txt$/i,
   hotReload: true,
   loader: async (filepath) => {

@@ -4,15 +4,11 @@ const { Handler } = require("../dist/index")
 
 const wait = (ms) => new Promise((resolve) => setTimeout(resolve, ms))
 
-const Inputs = jest.fn().mockReturnValueOnce("42").mockReturnValueOnce("666")
-
 const Loaded = jest
   .fn()
   .mockReturnValueOnce("0")
   .mockReturnValueOnce("1")
   .mockReturnValueOnce("2")
-
-const Reloaded = jest.fn().mockReturnValueOnce("42").mockReturnValueOnce("666")
 
 beforeAll(() => {
   fs.writeFileSync(path.join(__dirname, "files", "b.txt"), "1")
@@ -28,22 +24,27 @@ test("test", (done) => {
     onLoad: async (filepath, data) => {
       expect(data).toBe(Loaded())
     },
-    onReload: async (filepath, data) => {
-      expect(data).toBe(Reloaded())
+    onChange: async (filepath, data) => {
+      expect(data).toBe("42")
+    },
+    onRemove: async (filepath, data) => {
+      expect(data).toBe("42")
     },
   })
-
-  const tick = async () => {
-    fs.writeFileSync(path.join(__dirname, "files", "b.txt"), Inputs())
-
-    await wait(150)
-  }
 
   handler
     .init()
     .then(() => wait(150))
-    .then(tick)
-    .then(tick)
+    .then(async () => {
+      fs.writeFileSync(path.join(__dirname, "files", "b.txt"), "42")
+
+      await wait(150)
+    })
+    .then(async () => {
+      fs.unlinkSync(path.join(__dirname, "files", "b.txt"))
+
+      await wait(150)
+    })
     .then(() => {
       handler.destroy()
       done()

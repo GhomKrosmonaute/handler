@@ -1,8 +1,30 @@
 import path from "path"
 import md5 from "md5"
 import fs from "fs"
+import chokidar from "chokidar"
 
 export interface HandlerOptions<Data> {
+  /**
+   * File basename pattern to filter files
+   */
+  pattern?: RegExp
+  /**
+   * @default false
+   */
+  hotReload?: boolean
+  /**
+   * @default 100
+   */
+  hotReloadTimeout?: number
+  /**
+   * If you want to log the file loading process, you can set up a logger. <br>
+   * The logger must have a log method that accepts a string as a parameter. <br>
+   * @example ```ts
+   * const handler = new Handler("./commands", {
+   *   logger: console
+   * })
+   * ```
+   */
   logger?: {
     log: (message: string) => void
   }
@@ -18,100 +40,98 @@ export interface HandlerOptions<Data> {
    * ```
    */
   loggerPattern?: string
-  loader?: (path: string) => Promise<Data>
   /**
-   * If this function is defined, the reloaded files will be loaded by this function instead of the loader
+   * This method will load the file and return the data. <br>
+   * The data will be stored in the {@link Handler.elements} map.
    */
-  reloader?: (path: string) => Promise<Data>
-  pattern?: RegExp
-  onLoad?: (path: string, data?: Data) => Promise<void>
+  loader: (path: string) => Promise<Data>
   /**
-   * If this function is defined, the reloaded files will stop
-   * going through the onLoad function and go through this one instead
+   * This method will be called when the file is loaded. <br>
+   * The data will be transferred from the {@link loader} method.
    */
-  onReload?: (path: string, data?: Data) => Promise<void>
-  onFinish?: (paths: string[]) => Promise<void>
+  onLoad?: (path: string, data: Data) => Promise<void>
   /**
-   * @default false
+   * If this function is defined, the changed files will stop
+   * going through the {@link onLoad} function and go through this one instead
    */
-  hotReload?: boolean
+  onChange?: (path: string, data: Data) => Promise<void>
   /**
-   * @default 100
+   * This method will be called when the file is removed.
    */
-  hotReloadTimeout?: number
+  onRemove?: (path: string, oldData: Data) => Promise<void>
+  /**
+   * This method will be called after all files are loaded, at the end of the {@link Handler.init} method.
+   */
+  onFinish?: (data: Map<string, Data>) => Promise<void>
 }
 
 export class Handler<Data> {
   public elements: Map<string, Data> = new Map()
   public md5: Map<string, string> = new Map()
-  public timeouts: Map<string, NodeJS.Timeout | false> = new Map()
-  public watcher?: fs.FSWatcher
+  public watcher?: chokidar.FSWatcher
 
   public constructor(
-    private path: string,
-    private options?: HandlerOptions<Data>
+    private dirname: string,
+    private options: HandlerOptions<Data>
   ) {}
 
   async init(this: this) {
     this.elements.clear()
 
-    const filenames = await fs.promises.readdir(this.path)
-    const filepathList: string[] = []
+    const filenames = await fs.promises.readdir(this.dirname)
 
     for (const basename of filenames) {
+      const filepath = path.join(this.dirname, basename)
+
       try {
-        filepathList.push(await this._handle(basename, false))
+        await this._load(filepath, false)
       } catch (error: any) {
         if (error.message.startsWith("Ignored")) continue
         else throw error
       }
     }
 
-    await this.options?.onFinish?.(filepathList)
+    await this.options.onFinish?.(this.elements)
 
-    if (this.options?.hotReload)
-      this.watcher = fs.watch(this.path, async (event, basename) => {
-        if (event !== "change" || !basename) return
-
-        try {
-          await this._handle(basename, true)
-        } catch (error: any) {
-          if (error.message.startsWith("Ignored")) return
-          else throw error
-        }
-      })
+    if (this.options.hotReload)
+      this.watcher = chokidar
+        .watch(path.join(this.dirname, "*.*"))
+        .on("all", async (event, filepath) => {
+          try {
+            switch (event) {
+              case "add":
+              case "change":
+                await this._load(filepath, event === "change")
+                break
+              case "unlink":
+                await this._remove(filepath)
+                break
+            }
+          } catch (error: any) {
+            if (error.message.startsWith("Ignored")) return
+            else throw error
+          }
+        })
   }
 
   destroy(this: this) {
     this.watcher?.close()
-    this.timeouts.forEach((timeout) => timeout && clearTimeout(timeout))
-    this.timeouts.clear()
     this.elements.clear()
     this.md5.clear()
   }
 
-  private async _handle(
+  private async _load(
     this: this,
-    basename: string,
+    filepath: string,
     reloaded: boolean
-  ): Promise<string> {
-    if (this.options?.pattern && !this.options.pattern.test(basename))
-      throw new Error(`Ignored ${basename} by pattern`)
-
-    const filepath = path.join(this.path, basename)
+  ): Promise<void> {
+    const basename = path.basename(filepath)
     const filename = path.basename(filepath, path.extname(filepath))
 
-    if (this.options?.hotReload) {
-      if (this.timeouts.get(filepath))
-        throw new Error(`Ignored ${basename} by timeout`)
+    if (this.options.pattern && !this.options.pattern.test(basename))
+      throw new Error(`Ignored ${basename} by pattern`)
 
-      this.timeouts.set(
-        filepath,
-        setTimeout(() => {
-          this.timeouts.set(filepath, false)
-        }, this.options.hotReloadTimeout ?? 100)
-      )
-
+    if (this.options.hotReload) {
       const md5sum = md5(fs.readFileSync(filepath))
 
       if (this.md5.get(filepath) === md5sum)
@@ -119,7 +139,7 @@ export class Handler<Data> {
       else this.md5.set(filepath, md5sum)
     }
 
-    if (this.options?.logger)
+    if (this.options.logger)
       this.options.logger.log(
         this.options.loggerPattern
           ? this.options.loggerPattern
@@ -131,22 +151,43 @@ export class Handler<Data> {
 
     let loaded!: Data
 
-    const loader = reloaded
-      ? this.options?.reloader ?? this.options?.loader
-      : this.options?.loader
     const onLoad = reloaded
-      ? this.options?.onReload ?? this.options?.onLoad
-      : this.options?.onLoad
+      ? this.options.onChange ?? this.options.onLoad
+      : this.options.onLoad
 
-    if (loader) {
-      loaded = await loader(filepath)
-      this.elements.set(filepath, loaded)
-    }
+    loaded = await this.options.loader(filepath)
+    this.elements.set(filepath, loaded)
 
     if (onLoad) {
       await onLoad(filepath, loaded)
     }
+  }
 
-    return filepath
+  private async _remove(this: this, filepath: string): Promise<void> {
+    const basename = path.basename(filepath)
+    const filename = path.basename(filepath, path.extname(filepath))
+
+    if (this.options.pattern && !this.options.pattern.test(basename))
+      throw new Error(`Ignored ${basename} by pattern`)
+
+    if (!this.elements.has(filepath))
+      throw new Error(`Ignored ${basename} because isn't loaded`)
+
+    if (this.options.logger)
+      this.options.logger.log(
+        this.options.loggerPattern
+          ? this.options.loggerPattern
+              .replace("$path", filepath)
+              .replace("$basename", basename)
+              .replace("$filename", filename)
+          : `removed ${filename}`
+      )
+
+    const data = this.elements.get(filepath)!
+
+    this.elements.delete(filepath)
+    this.md5.delete(filepath)
+
+    await this.options.onRemove?.(filepath, data)
   }
 }
